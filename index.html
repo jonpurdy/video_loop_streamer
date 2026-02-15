@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Live HLS Player</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0f17;
+        --panel: #121a2a;
+        --text: #e6edf3;
+        --muted: #9fb1c1;
+        --border: #24324a;
+        --accent: #5bbcff;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      }
+      .wrap {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 20px;
+        display: grid;
+        gap: 14px;
+      }
+      header {
+        display: grid;
+        gap: 6px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 650;
+      }
+      .hint {
+        color: var(--muted);
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px;
+      }
+      form {
+        display: grid;
+        gap: 10px;
+      }
+      .row {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: 1fr auto;
+      }
+      input[type="url"] {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: #0d1424;
+        color: var(--text);
+        outline: none;
+      }
+      input[type="url"]:focus {
+        border-color: color-mix(in srgb, var(--accent), var(--border) 40%);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent), transparent 75%);
+      }
+      button {
+        padding: 10px 14px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: #0d1424;
+        color: var(--text);
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button.primary {
+        border-color: color-mix(in srgb, var(--accent), var(--border) 30%);
+        background: color-mix(in srgb, var(--accent), #0d1424 82%);
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      video {
+        width: 100%;
+        background: #000;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+      }
+      .log {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+          "Courier New", monospace;
+        font-size: 12px;
+        color: var(--muted);
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .kv {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 6px 10px;
+        color: var(--muted);
+      }
+      .kv b {
+        color: var(--text);
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>Live HLS Player</h1>
+        <div class="hint">
+          Default expects your playlist at <code>/hls/live.m3u8</code> (same host/port as this page).
+        </div>
+      </header>
+
+      <section class="panel">
+        <form id="playerForm">
+          <div class="row">
+            <input
+              id="hlsUrl"
+              type="url"
+              inputmode="url"
+              spellcheck="false"
+              value="/hls/live.m3u8"
+              aria-label="HLS URL"
+            />
+            <button class="primary" id="loadBtn" type="submit">Load</button>
+          </div>
+          <div class="row" style="grid-template-columns: auto auto 1fr; align-items: center">
+            <button id="stopBtn" type="button">Stop</button>
+            <button id="copyBtn" type="button">Copy URL</button>
+            <div class="hint" id="status">Idle</div>
+          </div>
+        </form>
+      </section>
+
+      <section>
+        <video id="video" controls playsinline></video>
+      </section>
+
+      <section class="panel">
+        <div class="kv">
+          <b>Notes</b>
+          <div>
+            Safari can often play HLS directly; Chrome/Firefox use hls.js here. If playback stutters, try a
+            shorter GOP/keyframe interval in FFmpeg (e.g. <code>-g 60</code> for 30fps).
+          </div>
+          <b>VLC URL</b>
+          <div><code id="vlcUrl">/hls/live.m3u8</code></div>
+        </div>
+        <div style="height: 10px"></div>
+        <div class="log" id="log"></div>
+      </section>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const video = $("video");
+      const form = $("playerForm");
+      const urlInput = $("hlsUrl");
+      const loadBtn = $("loadBtn");
+      const stopBtn = $("stopBtn");
+      const copyBtn = $("copyBtn");
+      const statusEl = $("status");
+      const logEl = $("log");
+      const vlcUrlEl = $("vlcUrl");
+
+      let hls = null;
+      let lastUrl = null;
+
+      function setStatus(text) {
+        statusEl.textContent = text;
+      }
+
+      function log(line) {
+        const ts = new Date().toLocaleTimeString();
+        logEl.textContent = `[${ts}] ${line}\n` + logEl.textContent;
+      }
+
+      function toAbsoluteUrl(maybeRelativeUrl) {
+        try {
+          return new URL(maybeRelativeUrl, window.location.href).toString();
+        } catch {
+          return maybeRelativeUrl;
+        }
+      }
+
+      function stop() {
+        if (hls) {
+          try {
+            hls.destroy();
+          } catch {}
+          hls = null;
+        }
+        video.removeAttribute("src");
+        video.load();
+        setStatus("Stopped");
+      }
+
+      async function load(url) {
+        const abs = toAbsoluteUrl(url);
+        lastUrl = abs;
+        vlcUrlEl.textContent = abs;
+        setStatus("Loading…");
+        log(`Loading ${abs}`);
+
+        stop();
+
+        if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          video.src = abs;
+          try {
+            await video.play();
+            setStatus("Playing (native HLS)");
+          } catch (e) {
+            setStatus("Loaded (native HLS) — press Play");
+            log(`Native play blocked: ${e && e.message ? e.message : String(e)}`);
+          }
+          return;
+        }
+
+        if (!window.Hls) {
+          setStatus("hls.js not loaded");
+          log("Error: hls.js not loaded (CDN blocked/offline).");
+          return;
+        }
+
+        if (!Hls.isSupported()) {
+          setStatus("HLS not supported in this browser");
+          log("Error: HLS not supported.");
+          return;
+        }
+
+        hls = new Hls({
+          lowLatencyMode: false,
+          backBufferLength: 30,
+          maxLiveSyncPlaybackRate: 1.0,
+        });
+
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          const details = data && data.details ? data.details : "unknown";
+          const fatal = data && data.fatal ? "fatal" : "non-fatal";
+          log(`hls.js ${fatal} error: ${details}`);
+          if (data && data.fatal) setStatus(`Error (${details})`);
+        });
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          setStatus("Playing (hls.js)");
+          video.play().catch((e) => {
+            setStatus("Loaded (hls.js) — press Play");
+            log(`Play blocked: ${e && e.message ? e.message : String(e)}`);
+          });
+        });
+
+        hls.loadSource(abs);
+        hls.attachMedia(video);
+      }
+
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        load(urlInput.value.trim());
+      });
+
+      stopBtn.addEventListener("click", () => stop());
+
+      copyBtn.addEventListener("click", async () => {
+        const url = lastUrl || toAbsoluteUrl(urlInput.value.trim());
+        try {
+          await navigator.clipboard.writeText(url);
+          log(`Copied URL: ${url}`);
+        } catch {
+          log(`Copy failed; URL: ${url}`);
+        }
+      });
+
+      // Auto-load on first visit.
+      load(urlInput.value.trim());
+    </script>
+  </body>
+</html>
