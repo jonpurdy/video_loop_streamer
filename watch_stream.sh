@@ -8,7 +8,7 @@ Watch video+audio directories and restart the stream when anything changes.
 This uses a simple polling signature (path + size + mtime), so it has zero deps on macOS.
 
 Usage:
-  ./watch_stream.sh [--mode hls|hls_udp|vlc_ts] [--interval SECONDS]
+  ./watch_stream.sh [--mode hls|hls_udp|hls_youtube|vlc_ts] [--interval SECONDS]
                           [--video-dir DIR] [--audio-dir DIR]
                           [--recursive] [--shuffle]
                           [--hls-dir DIR]
@@ -21,7 +21,8 @@ Defaults:
   --hls-dir   repo root/hls
 
 Notes:
-  - For faster browser startup, try: HLS_TIME=2 HLS_LIST_SIZE=4 scripts/watch_stream.sh
+  - For faster browser startup, try: HLS_TIME=2 HLS_LIST_SIZE=4 ./watch_stream.sh
+  - For --mode hls_youtube, set YOUTUBE_URL in env.
 EOF
 }
 
@@ -51,8 +52,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$mode" in
-  hls|hls_udp|vlc_ts) ;;
-  *) echo "Invalid --mode: $mode (use hls, hls_udp, or vlc_ts)" >&2; exit 2 ;;
+  hls|hls_udp|hls_youtube|vlc_ts) ;;
+  *) echo "Invalid --mode: $mode (use hls, hls_udp, hls_youtube, or vlc_ts)" >&2; exit 2 ;;
 esac
 
 command -v python3 >/dev/null 2>&1 || { echo "python3 not found in PATH" >&2; exit 127; }
@@ -118,6 +119,9 @@ start_stream() {
     bash "${root_dir}/run_hls.sh" --hls-dir "$hls_dir" &
   elif [[ "$mode" == "hls_udp" ]]; then
     bash "${root_dir}/run_hls_udp.sh" --hls-dir "$hls_dir" &
+  elif [[ "$mode" == "hls_youtube" ]]; then
+    [[ -n "${YOUTUBE_URL:-}" ]] || { echo "YOUTUBE_URL is required for --mode hls_youtube" >&2; exit 2; }
+    bash "${root_dir}/run_hls_youtube_audio.sh" --youtube-url "${YOUTUBE_URL}" --hls-dir "$hls_dir" &
   else
     bash "${root_dir}/run_vlc_http_ts.sh" &
   fi
