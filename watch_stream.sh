@@ -8,7 +8,7 @@ Watch video+audio directories and restart the stream when anything changes.
 This uses a simple polling signature (path + size + mtime), so it has zero deps on macOS.
 
 Usage:
-  scripts/watch_stream.sh [--mode hls|vlc_ts] [--interval SECONDS]
+  ./watch_stream.sh [--mode hls|hls_udp|vlc_ts] [--interval SECONDS]
                           [--video-dir DIR] [--audio-dir DIR]
                           [--recursive] [--shuffle]
                           [--hls-dir DIR]
@@ -51,8 +51,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$mode" in
-  hls|vlc_ts) ;;
-  *) echo "Invalid --mode: $mode (use hls or vlc_ts)" >&2; exit 2 ;;
+  hls|hls_udp|vlc_ts) ;;
+  *) echo "Invalid --mode: $mode (use hls, hls_udp, or vlc_ts)" >&2; exit 2 ;;
 esac
 
 command -v python3 >/dev/null 2>&1 || { echo "python3 not found in PATH" >&2; exit 127; }
@@ -116,6 +116,8 @@ start_stream() {
   echo "Starting stream (mode=${mode})…"
   if [[ "$mode" == "hls" ]]; then
     bash "${root_dir}/run_hls.sh" --hls-dir "$hls_dir" &
+  elif [[ "$mode" == "hls_udp" ]]; then
+    bash "${root_dir}/run_hls_udp.sh" --hls-dir "$hls_dir" &
   else
     bash "${root_dir}/run_vlc_http_ts.sh" &
   fi
