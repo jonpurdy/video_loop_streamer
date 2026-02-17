@@ -12,6 +12,7 @@ This script is separate from run_hls.sh so you can keep using file-based audio.
 Usage:
   ./run_hls_youtube_audio.sh --youtube-url URL [--video-playlist FILE] [--hls-dir DIR]
                              [--max-height N] [--random-start 0|1]
+                             [--video-encoder software|videotoolbox]
 
 Defaults:
   --video-playlist  ./playlist.txt
@@ -31,6 +32,10 @@ Env overrides (optional):
   VIDEO_UDP_PORT=23010
   MAX_HEIGHT=0
   RANDOM_START=1
+  VIDEO_ENCODER=software
+  VT_BITRATE=6000k
+  VT_MAXRATE=8000k
+  VT_BUFSIZE=12000k
 EOF
 }
 
@@ -41,6 +46,7 @@ hls_dir="${root_dir}/hls"
 youtube_url=""
 max_height=""
 random_start=""
+video_encoder=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -50,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     --hls-dir) hls_dir="$2"; shift 2 ;;
     --max-height) max_height="$2"; shift 2 ;;
     --random-start) random_start="$2"; shift 2 ;;
+    --video-encoder) video_encoder="$2"; shift 2 ;;
     *) echo "Unknown arg: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
@@ -76,9 +83,23 @@ ytdlp_format="${YTDLP_FORMAT:-bestaudio[ext=m4a]/bestaudio/best}"
 video_udp_port="${VIDEO_UDP_PORT:-23010}"
 max_height="${max_height:-${MAX_HEIGHT:-0}}"
 random_start="${random_start:-${RANDOM_START:-1}}"
+video_encoder="${video_encoder:-${VIDEO_ENCODER:-software}}"
+vt_bitrate="${VT_BITRATE:-6000k}"
+vt_maxrate="${VT_MAXRATE:-8000k}"
+vt_bufsize="${VT_BUFSIZE:-12000k}"
 
 [[ "$max_height" =~ ^[0-9]+$ ]] || { echo "MAX_HEIGHT/--max-height must be an integer >= 0" >&2; exit 2; }
 [[ "$random_start" == "0" || "$random_start" == "1" ]] || { echo "RANDOM_START/--random-start must be 0 or 1" >&2; exit 2; }
+[[ "$video_encoder" == "software" || "$video_encoder" == "videotoolbox" ]] || {
+  echo "VIDEO_ENCODER/--video-encoder must be software or videotoolbox" >&2
+  exit 2
+}
+if [[ "$video_encoder" == "videotoolbox" ]]; then
+  ffmpeg -hide_banner -encoders 2>/dev/null | grep -q "h264_videotoolbox" || {
+    echo "h264_videotoolbox encoder not available in this ffmpeg build" >&2
+    exit 1
+  }
+fi
 
 out_m3u8="${hls_dir%/}/live.m3u8"
 seg_pat="${hls_dir%/}/seg_%06d.ts"
@@ -165,9 +186,27 @@ run_video_loop() {
       -hide_banner -loglevel warning
       -re -i "$v"
       -map 0:v:0 -an
-      -c:v libx264 -preset "$preset" -crf "$crf" -pix_fmt yuv420p
-      -g "$gop" -keyint_min "$gop" -sc_threshold 0
+      -pix_fmt yuv420p
+      -g "$gop"
     )
+
+    if [[ "$video_encoder" == "videotoolbox" ]]; then
+      cmd+=(
+        -c:v h264_videotoolbox
+        -allow_sw 1
+        -b:v "$vt_bitrate"
+        -maxrate "$vt_maxrate"
+        -bufsize "$vt_bufsize"
+      )
+    else
+      cmd+=(
+        -c:v libx264
+        -preset "$preset"
+        -crf "$crf"
+        -keyint_min "$gop"
+        -sc_threshold 0
+      )
+    fi
 
     if [[ "$max_height" -gt 0 ]]; then
       cmd+=(-vf "scale=-2:${max_height}")

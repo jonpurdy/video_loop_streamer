@@ -29,6 +29,11 @@ Optional (cap output to 1080p, keep random first video):
 bash ./run_hls_youtube_audio.sh --youtube-url "https://www.youtube.com/live/_k-5U7IeK8g" --max-height 1080 --random-start 1
 ```
 
+Optional (macOS hardware encode via VideoToolbox):
+```bash
+bash ./run_hls_youtube_audio.sh --youtube-url "https://www.youtube.com/live/_k-5U7IeK8g" --video-encoder videotoolbox --max-height 1080
+```
+
 Terminal 2:
 ```bash
 caddy file-server --listen :8080 --root .
